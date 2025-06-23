@@ -3,6 +3,10 @@ let isAnimationRunning = false;
 let currentSettings = null;
 let animationFrame = null;
 
+let isReverseAnimationRunning = false;
+let heightsAtStop = []; // Store starting heights for reverse animation
+let reverseAnimationProgress = 0; // Progress from 0 to 1
+
 // Configuration object to centralize all constants
 const CONFIG = {
   FREQUENCY_COUNT: 256,
@@ -12,7 +16,8 @@ const CONFIG = {
   CROSS_ORIGIN: 'anonymous',
   VISUALIZER_CONTAINER_ID: '#visualisation',
   BAR_CLASS: '.petalBar',
-  SVG_NAMESPACE: 'http://www.w3.org/2000/svg'
+  SVG_NAMESPACE: 'http://www.w3.org/2000/svg',
+  STOP_ANIMATION_LENGTH: 0.02, // How fast petals return to rest (0.02 = slower, 0.08 = faster)
 };
 
 // State Machine for better state management
@@ -23,7 +28,7 @@ const STATES = {
   PLAYING: 'playing',
   PAUSED: 'paused',
   STOPPED: 'stopped',
-  ERROR: 'error'
+  ERROR: 'error',
 };
 
 // Cache for DOM elements to improve performance
@@ -65,7 +70,7 @@ export const playerState = {
   loaded: false,
   playing: false,
   mode: STATES.INIT,
-  currentState: STATES.INIT
+  currentState: STATES.INIT,
 };
 
 // State machine methods
@@ -78,10 +83,12 @@ const stateMachine = {
       console.log(`State transition: ${oldState} -> ${newState}`);
       this.onStateChange(newState, oldState);
     } else {
-      console.warn(`Invalid state transition: ${playerState.currentState} -> ${newState}`);
+      console.warn(
+        `Invalid state transition: ${playerState.currentState} -> ${newState}`
+      );
     }
   },
-  
+
   isValidTransition(from, to) {
     const validTransitions = {
       [STATES.INIT]: [STATES.LOADING, STATES.ERROR],
@@ -90,12 +97,12 @@ const stateMachine = {
       [STATES.PLAYING]: [STATES.PAUSED, STATES.STOPPED, STATES.ERROR],
       [STATES.PAUSED]: [STATES.PLAYING, STATES.STOPPED, STATES.ERROR],
       [STATES.STOPPED]: [STATES.PLAYING, STATES.ERROR],
-      [STATES.ERROR]: [STATES.INIT, STATES.LOADING]
+      [STATES.ERROR]: [STATES.INIT, STATES.LOADING],
     };
-    
+
     return validTransitions[from]?.includes(to) || false;
   },
-  
+
   onStateChange(newState, oldState) {
     // Update UI based on state
     switch (newState) {
@@ -123,12 +130,12 @@ const stateMachine = {
         break;
     }
   },
-  
+
   updateButtonStates(playDisabled, pauseDisabled, stopDisabled) {
     if (playButton) playButton.disabled = playDisabled;
     if (pauseButton) pauseButton.disabled = pauseDisabled;
     if (stopButton) stopButton.disabled = stopDisabled;
-  }
+  },
 };
 
 let audioContext = null;
@@ -155,27 +162,27 @@ export function initAudio() {
 
 function loadSong() {
   stateMachine.setState(STATES.LOADING);
-  
+
   player.crossOrigin = CONFIG.CROSS_ORIGIN;
   player.currentTime = 0; // Reset to start
   player.src = CONFIG.AUDIO_FILE;
-  
+
   const loadHandler = () => {
     console.log('Song loaded and ready to play');
     playerState.loaded = true;
     stateMachine.setState(STATES.READY);
     setupAudioContext();
   };
-  
+
   const errorHandler = (error) => {
     console.error('Failed to load audio:', error);
     playerState.loaded = false;
     stateMachine.setState(STATES.ERROR);
   };
-  
+
   player.addEventListener('loadedmetadata', loadHandler);
   player.addEventListener('error', errorHandler);
-  
+
   // Store for cleanup
   eventListeners.push(
     { element: player, event: 'loadedmetadata', handler: loadHandler },
@@ -350,7 +357,9 @@ function createVisualizerBars() {
 // Get cached visualizer bars for performance
 function getVisualizerBars() {
   if (!visualizerBarsCache) {
-    visualizerBarsCache = Array.from(document.querySelectorAll(CONFIG.BAR_CLASS));
+    visualizerBarsCache = Array.from(
+      document.querySelectorAll(CONFIG.BAR_CLASS)
+    );
   }
   return visualizerBarsCache;
 }
@@ -360,11 +369,11 @@ function animateVisualizer() {
   if (!isAnimationRunning) {
     return;
   }
-
   const visualizerBars = getVisualizerBars();
 
   animationFrame = requestAnimationFrame(animateVisualizer);
   analyzer.getByteFrequencyData(frequencyData);
+
   visualizerBars.forEach((svg, index) => {
     const frequencyValue = frequencyData[index];
     // Calculate height to ensure stem is always visible
@@ -380,6 +389,90 @@ function animateVisualizer() {
       svg.setAttribute('viewBox', `0 0 ${svgWidth} ${height}`);
     }
   });
+}
+
+// Add this new function to handle the synchronized reverse animation
+function animateToStartPosition() {
+  if (!isReverseAnimationRunning) {
+    return;
+  }
+
+  const visualizerBars = getVisualizerBars();
+  const targetHeight = parseFloat(currentSettings.initHeight);
+
+  animationFrame = requestAnimationFrame(animateToStartPosition);
+
+  // Increment animation progress for all petals simultaneously
+  reverseAnimationProgress += CONFIG.STOP_ANIMATION_LENGTH;
+
+  // Ensure progress doesn't exceed 1
+  if (reverseAnimationProgress >= 1) {
+    reverseAnimationProgress = 1;
+  }
+
+  // Apply easing function for smoother animation (ease-out)
+  const easedProgress = 1 - Math.pow(1 - reverseAnimationProgress, 3);
+
+  visualizerBars.forEach((svg, index) => {
+    // Calculate current height based on progress
+    // All petals move the same percentage toward target
+    const startHeight = heightsAtStop[index] || targetHeight;
+    const heightDifference = startHeight - targetHeight;
+    const currentHeight = startHeight - heightDifference * easedProgress;
+
+    // Update SVG viewBox
+    const svgWidth = parseFloat(currentSettings.barWidth);
+    svg.setAttribute('viewBox', `0 0 ${svgWidth} ${currentHeight}`);
+  });
+
+  // If animation is complete, stop the reverse animation
+  if (reverseAnimationProgress >= 1) {
+    stopReverseAnimation();
+  }
+}
+
+// Function to start the reverse animation
+function startReverseAnimation() {
+  if (isReverseAnimationRunning) {
+    return; // Already running
+  }
+
+  console.log('Starting synchronized reverse animation to initial position');
+  isReverseAnimationRunning = true;
+  reverseAnimationProgress = 0; // Reset progress
+
+  // Capture current heights of all petals at the moment stop is pressed
+  const visualizerBars = getVisualizerBars();
+  heightsAtStop = []; // resets array
+
+  // get heights of all petals and add to array heightsAtStop
+  visualizerBars.forEach((svg, index) => {
+    // Get current viewBox height
+    const viewBox = svg.getAttribute('viewBox');
+    if (viewBox) {
+      const viewBoxValues = viewBox.split(' ');
+      heightsAtStop[index] =
+        parseFloat(viewBoxValues[3]) || parseFloat(currentSettings.initHeight);
+    } else {
+      heightsAtStop[index] = parseFloat(currentSettings.initHeight);
+    }
+  });
+
+  animateToStartPosition();
+}
+
+// Function to stop the reverse animation
+function stopReverseAnimation() {
+  isReverseAnimationRunning = false;
+  if (animationFrame) {
+    cancelAnimationFrame(animationFrame);
+    animationFrame = null;
+  }
+
+  // Reset animation variables
+  heightsAtStop = [];
+  reverseAnimationProgress = 0;
+  console.log('Synchronized reverse animation completed');
 }
 
 // Start the visualizer
@@ -403,6 +496,8 @@ export function stopVisualizer() {
     cancelAnimationFrame(animationFrame);
     animationFrame = null;
   }
+  // Also stop reverse animation if running
+  stopReverseAnimation();
   console.log('Visualizer stopped');
 }
 
@@ -416,25 +511,27 @@ export function resetVisualizer() {
 // Cleanup function for memory management
 export function cleanup() {
   stopVisualizer();
-  
+  stopReverseAnimation();
+
   // Remove event listeners
   eventListeners.forEach(({ element, event, handler }) => {
     element.removeEventListener(event, handler);
   });
   eventListeners = [];
-  
+
   // Close audio context
   if (audioContext && audioContext.state !== 'closed') {
     audioContext.close();
     audioContext = null;
   }
-  
+
   // Clear caches
   visualizerBarsCache = null;
   frequencyData = null;
   analyzer = null;
   source = null;
-  
+  currentHeights = [];
+
   console.log('Cleanup completed');
 }
 
@@ -448,7 +545,11 @@ window.addEventListener('DOMContentLoaded', () => {
 
 // Updated button handlers using the simplified approach
 playButton.addEventListener('click', () => {
-  if (playerState.currentState === STATES.READY || playerState.currentState === STATES.PAUSED || playerState.currentState === STATES.STOPPED) {
+  if (
+    playerState.currentState === STATES.READY ||
+    playerState.currentState === STATES.PAUSED ||
+    playerState.currentState === STATES.STOPPED
+  ) {
     // Resume audio context if suspended (browser security requirement)
     if (audioContext && audioContext.state === 'suspended') {
       audioContext.resume();
@@ -462,11 +563,17 @@ playButton.addEventListener('click', () => {
 });
 
 stopButton.addEventListener('click', () => {
-  if (playerState.currentState === STATES.PLAYING || playerState.currentState === STATES.PAUSED) {
+  if (
+    playerState.currentState === STATES.PLAYING ||
+    playerState.currentState === STATES.PAUSED
+  ) {
     stateMachine.setState(STATES.STOPPED);
     player.pause();
     player.currentTime = 0; // Reset to beginning
     stopVisualizer();
+
+    // Start the reverse animation to return petals to starting position
+    startReverseAnimation();
   }
 });
 
