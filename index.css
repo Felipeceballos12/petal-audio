@@ -1,0 +1,56 @@
+#div-player-container {
+  overflow: hidden;
+}
+
+#div-eq-container {
+  /*  height: 255px; */
+  height: 213px;
+  position: relative;
+  margin: 10px;
+}
+
+.equalizer-img {
+  width: 100%;
+  height: auto;
+  position: relative;
+  /* bottom: -37px; */
+  bottom: -49px;
+}
+
+.vis-circle {
+  position: absolute;
+  border-radius: 50%;
+}
+
+#visualisation {
+  display: flex;
+  width: 100%;
+  position: absolute;
+  bottom: 0;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  justify-content: center;
+  gap: 5px;
+  overflow: hidden;
+}
+
+#visualisation > div {
+  position: relative;
+  bottom: 0px;
+}
+
+#round-visualisation {
+  position: absolute;
+  width: 4%;
+  height: 4%;
+  top: 48%;
+  left: 48%;
+  background: #bf1aee;
+  border-radius: 50%;
+}
+
+.center-div {
+  display: block;
+  margin-right: auto;
+  margin-left: auto;
+}
