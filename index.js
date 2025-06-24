@@ -1,142 +1,19 @@
 // Simple responsive visualizer - no IIFEs, just clean functions
+import { STATES, playerState, stateMachine } from './stateMachine.js';
+import {
+  CONFIG,
+  getVisualizerBars,
+  clearVisualizerBarsCache,
+  setupResponsiveQueries,
+  currentSettings,
+} from './util.js';
+
 let isAnimationRunning = false;
-let currentSettings = null;
 let animationFrame = null;
 
 let isReverseAnimationRunning = false;
 let heightsAtStop = []; // Store starting heights for reverse animation
 let reverseAnimationProgress = 0; // Progress from 0 to 1
-
-// Configuration object to centralize all constants
-const CONFIG = {
-  FREQUENCY_COUNT: 256,
-  MAX_FREQUENCY_VALUE: 255,
-  MIN_ANIMATION_HEIGHT: 30,
-  AUDIO_FILE: "./Nana's Words delok patefon FINAL.mp3",
-  CROSS_ORIGIN: 'anonymous',
-  VISUALIZER_CONTAINER_ID: '#visualisation',
-  BAR_CLASS: '.petalBar',
-  SVG_NAMESPACE: 'http://www.w3.org/2000/svg',
-  STOP_ANIMATION_LENGTH: 0.02, // How fast petals return to rest (0.02 = slower, 0.08 = faster)
-};
-
-// State Machine for better state management
-const STATES = {
-  INIT: 'init',
-  LOADING: 'loading',
-  READY: 'ready',
-  PLAYING: 'playing',
-  PAUSED: 'paused',
-  STOPPED: 'stopped',
-  ERROR: 'error',
-};
-
-// Cache for DOM elements to improve performance
-let visualizerBarsCache = null;
-
-// Our responsive settings for different screen sizes
-const responsiveSettings = {
-  landScapeMobile: {
-    barCount: 16,
-    heightMultiplier: 136,
-    initHeight: '60',
-    barWidth: '30.4px',
-    deviceType: 'landScapemobile',
-  },
-  mobile: {
-    barCount: 16,
-    heightMultiplier: 136,
-    initHeight: '60',
-    barWidth: '30.4px',
-    deviceType: 'mobile',
-  },
-  tablet: {
-    barCount: 16,
-    heightMultiplier: 116,
-    initHeight: '1',
-    barWidth: '30.4px',
-    deviceType: 'tablet',
-  },
-  desktop: {
-    barCount: 16,
-    heightMultiplier: 139,
-    initHeight: '1',
-    barWidth: '30.4px',
-    deviceType: 'desktop',
-  },
-};
-
-export const playerState = {
-  loaded: false,
-  playing: false,
-  mode: STATES.INIT,
-  currentState: STATES.INIT,
-};
-
-// State machine methods
-const stateMachine = {
-  setState(newState) {
-    if (this.isValidTransition(playerState.currentState, newState)) {
-      const oldState = playerState.currentState;
-      playerState.currentState = newState;
-      playerState.mode = newState; // Keep backward compatibility
-      console.log(`State transition: ${oldState} -> ${newState}`);
-      this.onStateChange(newState, oldState);
-    } else {
-      console.warn(
-        `Invalid state transition: ${playerState.currentState} -> ${newState}`
-      );
-    }
-  },
-
-  isValidTransition(from, to) {
-    const validTransitions = {
-      [STATES.INIT]: [STATES.LOADING, STATES.ERROR],
-      [STATES.LOADING]: [STATES.READY, STATES.ERROR],
-      [STATES.READY]: [STATES.PLAYING, STATES.ERROR],
-      [STATES.PLAYING]: [STATES.PAUSED, STATES.STOPPED, STATES.ERROR],
-      [STATES.PAUSED]: [STATES.PLAYING, STATES.STOPPED, STATES.ERROR],
-      [STATES.STOPPED]: [STATES.PLAYING, STATES.ERROR],
-      [STATES.ERROR]: [STATES.INIT, STATES.LOADING],
-    };
-
-    return validTransitions[from]?.includes(to) || false;
-  },
-
-  onStateChange(newState, oldState) {
-    // Update UI based on state
-    switch (newState) {
-      case STATES.LOADING:
-        this.updateButtonStates(true, true, true);
-        break;
-      case STATES.READY:
-        this.updateButtonStates(false, true, true);
-        break;
-      case STATES.PLAYING:
-        this.updateButtonStates(true, false, false);
-        playerState.playing = true;
-        break;
-      case STATES.PAUSED:
-        this.updateButtonStates(false, false, false);
-        playerState.playing = false;
-        break;
-      case STATES.STOPPED:
-        this.updateButtonStates(false, true, true);
-        playerState.playing = false;
-        break;
-      case STATES.ERROR:
-        this.updateButtonStates(true, true, true);
-        playerState.playing = false;
-        break;
-    }
-  },
-
-  updateButtonStates(playDisabled, pauseDisabled, stopDisabled) {
-    if (playButton) playButton.disabled = playDisabled;
-    if (pauseButton) pauseButton.disabled = pauseDisabled;
-    if (stopButton) stopButton.disabled = stopDisabled;
-  },
-};
 
 let audioContext = null;
 let analyzer = null;
@@ -155,7 +32,7 @@ export const player = new Audio();
 export function initAudio() {
   // Initialize the responsive system when the page loads
   // This sets up our media queries and initial settings
-  setupResponsiveQueries();
+  setupResponsiveQueries(createVisualizerBars);
   loadSong();
   createVisualizerBars();
 }
@@ -221,62 +98,6 @@ function setupAudioContext() {
   }
 }
 
-// Set up our media queries using matchMedia
-function setupResponsiveQueries() {
-  const landScapeMobileQuery = window.matchMedia(
-    '(orientation: landscape) and (max-width: 800px) '
-  );
-  const mobileQuery = window.matchMedia('(max-width: 800px)');
-  const tabletQuery = window.matchMedia(
-    '(min-width: 801px) and (max-width: 1120px)'
-  );
-  const desktopQuery = window.matchMedia('(min-width: 1121px)');
-
-  // Function to update settings when screen size changes
-  function updateSettings() {
-    let newSettings;
-
-    if (mobileQuery.matches) {
-      if (landScapeMobileQuery.matches) {
-        newSettings = responsiveSettings.landScapeMobile;
-      } else {
-        newSettings = responsiveSettings.mobile;
-      }
-    } else if (tabletQuery.matches) {
-      newSettings = responsiveSettings.tablet;
-    } else if (desktopQuery.matches) {
-      newSettings = responsiveSettings.desktop;
-    }
-
-    // Only rebuild if settings actually changed
-    if (
-      !currentSettings ||
-      currentSettings.deviceType !== newSettings.deviceType
-    ) {
-      currentSettings = newSettings;
-      const visualizerBars = Array.from(document.querySelectorAll('.petalBar'));
-      console.log('Queries: ', { visualizerBars });
-      // Rebuild bars if the visualizer is active
-      if (visualizerBars.length > 0) {
-        createVisualizerBars();
-      }
-    } else {
-      // If only height multiplier changed, just update that
-      currentSettings = newSettings;
-    }
-  }
-
-  // Set initial settings
-  updateSettings();
-
-  // Listen for changes to each media query
-  // This is the key advantage of matchMedia - precise boundary detection
-  landScapeMobileQuery.addEventListener('change', updateSettings);
-  mobileQuery.addEventListener('change', updateSettings);
-  tabletQuery.addEventListener('change', updateSettings);
-  desktopQuery.addEventListener('change', updateSettings);
-}
-
 // Create the visual bars based on current responsive settings
 function createVisualizerBars() {
   const container = document.querySelector(CONFIG.VISUALIZER_CONTAINER_ID);
@@ -288,7 +109,7 @@ function createVisualizerBars() {
 
   // Clear existing bars and cache
   container.innerHTML = '';
-  visualizerBarsCache = null;
+  clearVisualizerBarsCache();
 
   // Use current responsive settings
   const settings = currentSettings;
@@ -352,16 +173,6 @@ function createVisualizerBars() {
     barContainer.appendChild(svg);
     container.appendChild(barContainer);
   }
-}
-
-// Get cached visualizer bars for performance
-function getVisualizerBars() {
-  if (!visualizerBarsCache) {
-    visualizerBarsCache = Array.from(
-      document.querySelectorAll(CONFIG.BAR_CLASS)
-    );
-  }
-  return visualizerBarsCache;
 }
 
 // Update the animation function
@@ -479,7 +290,7 @@ function stopReverseAnimation() {
 export function startVisualizer() {
   // Make sure we have current responsive settings
   if (!currentSettings) {
-    setupResponsiveQueries();
+    setupResponsiveQueries(createVisualizerBars);
   }
 
   // Start the animation
@@ -504,7 +315,7 @@ export function stopVisualizer() {
 // Reset the visualizer completely
 export function resetVisualizer() {
   stopVisualizer();
-  visualizerBarsCache = null;
+  clearVisualizerBarsCache();
   console.log('Visualizer reset');
 }
 
@@ -526,7 +337,7 @@ export function cleanup() {
   }
 
   // Clear caches
-  visualizerBarsCache = null;
+  clearVisualizerBarsCache();
   frequencyData = null;
   analyzer = null;
   source = null;
@@ -542,6 +353,10 @@ window.addEventListener('DOMContentLoaded', () => {
   pauseButton.disabled = true;
   stopButton.disabled = true;
 });
+
+// Add cleanup listeners for proper memory management
+window.addEventListener('beforeunload', cleanup);
+window.addEventListener('visibilitychange', cleanup);
 
 // Updated button handlers using the simplified approach
 playButton.addEventListener('click', () => {
