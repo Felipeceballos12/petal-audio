@@ -98,7 +98,6 @@ export function setupResponsiveQueries(createVisualizerBarsCallback) {
     ) {
       currentSettings = newSettings;
       const visualizerBars = Array.from(document.querySelectorAll('.petalBar'));
-      console.log('Queries: ', { visualizerBars });
       // Rebuild bars if the visualizer is active
       if (visualizerBars.length > 0) {
         createVisualizerBarsCallback();

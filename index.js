@@ -341,7 +341,6 @@ export function cleanup() {
   frequencyData = null;
   analyzer = null;
   source = null;
-  currentHeights = [];
 
   console.log('Cleanup completed');
 }
